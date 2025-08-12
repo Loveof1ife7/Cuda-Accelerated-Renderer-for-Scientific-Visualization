@@ -1,0 +1,13 @@
+build/
+bin/
+obj/
+
+# Ignore user-specific files
+*.user
+*.sln
+*.suo
+
+# Ignore compiled files
+*.o
+*.exe
+
