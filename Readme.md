@@ -1,4 +1,4 @@
-# Cuda-based Volume Renderer from Scratch
+# CudaRenderer4SciVis
 
 ## 模块划分方式
 
@@ -8,10 +8,11 @@
 
 | 模块名               | 功能说明                   |
 | ----------------- | ---------------------- |
-| `volume_renderer` | 主 CUDA kernel，体积渲染核心逻辑 |
+| `volume_renderer` | c++ class for volume renderer，体积渲染核心逻辑 |
+| `render_kernal`   | cuda kernel for accelerated renderering |
 | `camera`          | 构造视图光线                 |
-| `film`            | 存储渲染结果图像并导出为 PNG       |
-| `utils`           | 向量、矩阵运算，常用函数           |
+| `scene`            | 存储渲染结果图像并导出为 PNG       |
+| `transfer_function`| 向量、矩阵运算，常用函数           |
 | `config`          | 渲染参数、图像尺寸、步长等常量配置      |
 
 > ✅：实现一个最小可运行的 pipeline。
@@ -55,8 +56,6 @@
 | `classifier`    | 灰度值 → 颜色/透明度传输函数       |
 | `implicit_geom` | 隐式几何体绘制（e.g. Metaball） |
 | `main_scene`    | 管理整体渲染场景               |
-
-> 🔵 适合熟悉基础之后慢慢加入，帮助你深入 GUI/CUDA 交互、高级渲染。
 
 ---
 

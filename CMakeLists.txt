@@ -15,13 +15,13 @@ set(CMAKE_CUDA_ARCHITECTURES 86)
 
 # === Dependencies ===
 # CUDA
-find_package(CUDA REQUIRED)
-include_directories(${CUDA_INCLUDE_DIRS})
-if(CMAKE_CUDA_COMPILER)
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcudafe --diag_suppress=20236")
-endif()
+enable_language(CUDA)
 
 # OpenGL
+
+cmake_policy(SET CMP0072 NEW)
+set(OpenGL_GL_PREFERENCE GLVND)
+
 find_package(OpenGL REQUIRED)
 if(OpenGL_FOUND)
 	message(STATUS "OpenGL found.")
