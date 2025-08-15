@@ -94,6 +94,10 @@ void renderImGui()
 
 int main(int, char **)
 {
+
+#ifdef DEBUG
+  std::cout << "Debug mode is active!" << std::endl;
+#endif
   GLFWwindow *window = initWindow();
   if (!window)
   {
