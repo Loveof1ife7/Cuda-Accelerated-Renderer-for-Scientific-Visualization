@@ -14,6 +14,7 @@ using MathUtils::Kernel::mulS;
 using MathUtils::Kernel::mulV;
 using MathUtils::Kernel::normalize3;
 using MathUtils::Kernel::sub3;
+
 __device__ __forceinline__ float linearToSRGB(float x)
 {
     x = fminf(fmaxf(x, 0.f), 1.f);
@@ -53,7 +54,7 @@ __device__ float3 worldToUVW(const DeviceVolume &vol, const float3 &pWorld)
 {
     //* vol.origin is the min corner of the volume, voxel_size is the size of a voxel, dim is the number of voxels in each direction
 
-#ifndef NDEBUG
+#ifdef DEBUG
     if (vol.dim.x <= 0 || vol.dim.y <= 0 || vol.dim.z <= 0)
     {
         printf("Volume dimension is invalid:(%d, %d, %d)\n",
@@ -93,7 +94,7 @@ __device__ float3 worldToUVW(const DeviceVolume &vol, const float3 &pWorld)
         fminf(fmaxf(idx.y / dimm1.y, 0.0f), 1.0f),
         fminf(fmaxf(idx.z / dimm1.z, 0.0f), 1.0f));
 
-#ifdef DEBUG_UVW
+#ifdef DEBUG
     if (isnan(uvw.x) || isnan(uvw.y) || isnan(uvw.z))
     {
         printf("Invalid UVW: pWorld(%.3f,%.3f,%.3f) -> idx(%.3f,%.3f,%.3f)\n",
@@ -173,9 +174,9 @@ __device__ __forceinline__ void compositeFrontToBack_unpremul(
     accum.w += oneMinusAaccum * a;
 }
 
-__device__ __forceinline__ void compositeFrontToBack(float4 sampledPremulRGBA,
-                                                     float opacityScale,
-                                                     float4 &accum)
+__device__ __forceinline__ void compositeFrontToBack_premul(float4 sampledPremulRGBA,
+                                                            float opacityScale,
+                                                            float4 &accum)
 {
     float a_i = clampf(sampledPremulRGBA.w * opacityScale, 0.f, 1.0f);
     float oneMinusAaccum = 1.0f - accum.w;
@@ -240,18 +241,14 @@ __global__ void volumeRendererKernel(const DeviceScene scene,
             float sigma = c.w * scene.d_volume.density_scale * scene.opacityScale;
             float a_i = 1.f - expf(-sigma * stepInVoxel);
             compositeFrontToBack_unpremul(make_float3(c.x, c.y, c.z), a_i, accum);
-
+#ifdef DEBUG
             if (x == width / 2 && y == height / 2)
             {
                 printf("a_i=%.3e step=%.3e accum=(%.3e,%.3e,%.3e,%.3e)\n",
                        a_i, stepWorld, accum.x, accum.y, accum.z, accum.w);
             }
+#endif
 
-            // float a = c.w * scene.d_volume.density_scale;
-
-            // float4 permul = f4(c.x * a, c.y * a, c.z * a, a);
-
-            // compositeFrontToBack(permul, scene.opacityScale, accum);
             if (accum.w > terminate)
                 break;
         }
@@ -270,6 +267,7 @@ __global__ void volumeRendererKernel(const DeviceScene scene,
     float3 color = (accum.w > 1e-6f)
                        ? make_float3(accum.x / accum.w, accum.y / accum.w, accum.z / accum.w)
                        : make_float3(0, 0, 0);
+#ifdef DEBUG
     if (x == width / 2 && y == height / 2)
     {
         unsigned char R = toByte(color.x);
@@ -278,6 +276,7 @@ __global__ void volumeRendererKernel(const DeviceScene scene,
         printf("final color linear=(%.3f,%.3f,%.3f) -> 8bit=(%u,%u,%u)\n",
                color.x, color.y, color.z, R, G, B);
     }
+#endif
 
     if (scene.mode == 0)
     {

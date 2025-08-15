@@ -11,7 +11,8 @@
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "CMAKE_C_COMPILER": "/usr/bin/gcc",
                 "CMAKE_CXX_COMPILER": "/usr/bin/g++",
-                "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc"
+                "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc",
+                "CMAKE_CXX_FLAGS": "-DEBUG"
             }
         },
         {
