@@ -1,4 +1,4 @@
-# CudaRenderer4SciVis
+# Cuda-Accelerated-Renderer-for-SciVis
 
 ## 模块划分方式
 
