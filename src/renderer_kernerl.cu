@@ -1,17 +1,29 @@
+#include <stdio.h>
+#include "cuda_utils.hpp"
 #include "renderer_kernel.hpp"
 
-using kernel_utils::add3;
-using kernel_utils::clampf;
-using kernel_utils::cross3;
-using kernel_utils::dot3;
-using kernel_utils::f3;
-using kernel_utils::f4;
-using kernel_utils::length3;
-using kernel_utils::mad3;
-using kernel_utils::mulS;
-using kernel_utils::mulV;
-using kernel_utils::normalize3;
-using kernel_utils::sub3;
+using MathUtils::Kernel::add3;
+using MathUtils::Kernel::clampf;
+using MathUtils::Kernel::cross3;
+using MathUtils::Kernel::dot3;
+using MathUtils::Kernel::f3;
+using MathUtils::Kernel::f4;
+using MathUtils::Kernel::length3;
+using MathUtils::Kernel::mad3;
+using MathUtils::Kernel::mulS;
+using MathUtils::Kernel::mulV;
+using MathUtils::Kernel::normalize3;
+using MathUtils::Kernel::sub3;
+__device__ __forceinline__ float linearToSRGB(float x)
+{
+    x = fminf(fmaxf(x, 0.f), 1.f);
+    return (x <= 0.0031308f) ? (12.92f * x) : (1.055f * powf(x, 1.f / 2.4f) - 0.055f);
+}
+__device__ __forceinline__ unsigned char toByte(float x)
+{
+    x = fminf(fmaxf(x, 0.f), 1.f);
+    return (unsigned char)(x * 255.f + 0.5f);
+}
 
 __device__ bool intersectAABB(
     const float3 &ro, const float3 &rd,
@@ -36,7 +48,6 @@ __device__ bool intersectAABB(
 
     return tmax > tmin;
 }
-
 // ====== world to uvw in [0,1]======
 __device__ float3 worldToUVW(const DeviceVolume &vol, const float3 &pWorld)
 {
@@ -151,6 +162,16 @@ __device__ float sampleVolume(const float *volume, int3 dim, float3 pos)
     c1 = c01 * (1 - dy) + c11 * dy;
     return c0 * (1 - dz) + c1 * dz;
 }
+__device__ __forceinline__ void compositeFrontToBack_unpremul(
+    float3 rgb, float a, float4 &accum)
+{
+    float oneMinusAaccum = 1.f - accum.w;
+    float3 rgbPremul = make_float3(rgb.x * a, rgb.y * a, rgb.z * a);
+    accum.x += oneMinusAaccum * rgbPremul.x;
+    accum.y += oneMinusAaccum * rgbPremul.y;
+    accum.z += oneMinusAaccum * rgbPremul.z;
+    accum.w += oneMinusAaccum * a;
+}
 
 __device__ __forceinline__ void compositeFrontToBack(float4 sampledPremulRGBA,
                                                      float opacityScale,
@@ -178,16 +199,23 @@ __global__ void volumeRendererKernel(const DeviceScene scene,
 
     float3 ro, rd;
     scene.d_camera.generateRay(x, y, width, height, ro, rd);
+    float3 bmin{}, bmax{};
+    volumeAABB(scene.d_volume, bmin, bmax);
 
     float tmin, tmax;
-    if (!intersectAABB(ro, rd, scene.clipMin, scene.clipMax, tmin, tmax))
+    if (!rayBox(ro, rd, bmin, bmax, tmin, tmax))
     {
         output[y * width + x] = make_uchar4(0, 0, 0, 255);
         return;
     }
+    const float vx = scene.d_volume.voxel_size.x;
+    const float vy = scene.d_volume.voxel_size.y;
+    const float vz = scene.d_volume.voxel_size.z;
+    const float voxelMin = fminf(vx, fminf(vy, vz));
+    float stepWorld = fmaxf(scene.step_size, 1e-4f);
+    float stepInVoxel = stepWorld / fmaxf(voxelMin, 1e-6f);
 
     float4 accum = f4(0, 0, 0, 0);
-    float stepWorld = fmaxf(scene.step_size, 1e-4f);
     tmin = fmaxf(tmin, 0.0f);
     const float terminate = 0.98f;
     float maxVal = -1e30f;
@@ -196,7 +224,7 @@ __global__ void volumeRendererKernel(const DeviceScene scene,
     // ===  ray march  ===
     for (float t = tmin; t <= tmax; t += stepWorld)
     {
-        float3 pWorld = add3(ro, mulS(rd, stepWorld));
+        float3 pWorld = add3(ro, mulS(rd, t));
         float3 uvw = worldToUVW(scene.d_volume, pWorld);
 
         if (uvw.x < 0.f || uvw.x > 1.f ||
@@ -209,13 +237,21 @@ __global__ void volumeRendererKernel(const DeviceScene scene,
         if (scene.mode == 0)
         { // -- mode 0: volume rendering
             float4 c = sampleTF(scene.d_tf, s);
+            float sigma = c.w * scene.d_volume.density_scale * scene.opacityScale;
+            float a_i = 1.f - expf(-sigma * stepInVoxel);
+            compositeFrontToBack_unpremul(make_float3(c.x, c.y, c.z), a_i, accum);
 
-            float a = c.w * scene.d_volume.density_scale;
+            if (x == width / 2 && y == height / 2)
+            {
+                printf("a_i=%.3e step=%.3e accum=(%.3e,%.3e,%.3e,%.3e)\n",
+                       a_i, stepWorld, accum.x, accum.y, accum.z, accum.w);
+            }
 
-            float4 permul = f4(c.x * a, c.y * a, c.z * a, a);
+            // float a = c.w * scene.d_volume.density_scale;
 
-            compositeFrontToBack(permul, scene.opacityScale, accum);
+            // float4 permul = f4(c.x * a, c.y * a, c.z * a, a);
 
+            // compositeFrontToBack(permul, scene.opacityScale, accum);
             if (accum.w > terminate)
                 break;
         }
@@ -225,21 +261,121 @@ __global__ void volumeRendererKernel(const DeviceScene scene,
         else if (scene.mode == 2)
         { // -- mode 2: MIP
             maxVal = fmaxf(maxVal, s);
+
             continue;
         }
     }
 
     // write output
-    float3 color;
+    float3 color = (accum.w > 1e-6f)
+                       ? make_float3(accum.x / accum.w, accum.y / accum.w, accum.z / accum.w)
+                       : make_float3(0, 0, 0);
+    if (x == width / 2 && y == height / 2)
+    {
+        unsigned char R = toByte(color.x);
+        unsigned char G = toByte(color.y);
+        unsigned char B = toByte(color.z);
+        printf("final color linear=(%.3f,%.3f,%.3f) -> 8bit=(%u,%u,%u)\n",
+               color.x, color.y, color.z, R, G, B);
+    }
+
     if (scene.mode == 0)
     {
         // Total light intensity divided by total opacity
         color = accum.w > 1e-6f ? f3(accum.x / accum.w, accum.y / accum.w, accum.z / accum.w) : f3(0.f, 0.f, 0.f);
+
+        // sRGB 编码后写回
         output[y * width + x] = make_uchar4(
-            (unsigned char)clampf(color.x * 255.f, 0.f, 255.f),
-            (unsigned char)clampf(color.y * 255.f, 0.f, 255.f),
-            (unsigned char)clampf(color.z * 255.f, 0.f, 255.f),
+            toByte(linearToSRGB(color.x)),
+            toByte(linearToSRGB(color.y)),
+            toByte(linearToSRGB(color.z)),
             255);
         return;
     }
+}
+
+__global__ void kernelFirstSample(const DeviceScene scene,
+                                  uchar4 *output,
+                                  int width, int height)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= width || y >= height)
+        return;
+
+    float3 ro{}, rd{};
+    scene.d_camera.generateRay(x, y, width, height, ro, rd);
+
+    float3 bmin{}, bmax{};
+    volumeAABB(scene.d_volume, bmin, bmax);
+
+    float tmin, tmax;
+    if (!rayBox(ro, rd, bmin, bmax, tmin, tmax))
+    {
+        output[y * width + x] = make_uchar4(0, 0, 0, 255);
+        return;
+    }
+
+    float4 accum = f4(0, 0, 0, 0);
+    float stepWorld = 1e-3f;
+    tmin = fmaxf(tmin, 0.0f);
+
+    // first sample
+    float3 p_in = add3(ro, mulS(rd, tmin + stepWorld));
+    float3 uvw_in = worldToUVW(scene.d_volume, p_in);
+    float s_in = sampleField(scene.d_volume, uvw_in);
+
+    // middle samples
+    float3 p_mid = add3(
+        ro,
+        mulS(rd, (fmaxf(tmin, 0.f) + tmax) * 0.5f));
+    float3 uvw_mid = worldToUVW(scene.d_volume, p_mid);
+    float s_mid = sampleField(scene.d_volume, uvw_mid);
+
+    unsigned char g = (unsigned char)(fminf(1.f, s_mid) * 255);
+    output[y * width + x] = make_uchar4(g, g, g, 255);
+
+    if (x == width / 2 && y == height / 2)
+    {
+        printf("t0=%.4f t1=%.4f t_in=%.4f uvw_in=(%.3f,%.3f,%.3f) s_in=%.4f\n",
+               tmin, tmax, tmin + stepWorld, uvw_in.x, uvw_in.y, uvw_in.z, s_in);
+        printf("t_mid=%.4f uvw_mid=(%.3f,%.3f,%.3f) s_mid=%.4f\n",
+               tmin + (fmaxf(tmin, 0.f) + tmax) * 0.5f, uvw_mid.x, uvw_mid.y, uvw_mid.z, s_mid);
+    }
+
+    return;
+}
+
+__global__ void kernelMip(const DeviceScene scene,
+                          uchar4 *output,
+                          int width, int height)
+{
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= width || y >= height)
+        return;
+    const int idx = y * width + x;
+
+    float3 ro{}, rd{};
+    scene.d_camera.generateRay(x, y, width, height, ro, rd);
+
+    float tmin{}, tmax{};
+    if (!intersectAABB(ro, rd, scene.clipMin, scene.clipMax, tmin, tmax))
+    {
+        output[idx] = make_uchar4(0, 0, 0, 255);
+    }
+    // step size
+    float vx = scene.d_volume.voxel_size.x, vy = scene.d_volume.voxel_size.y, vz = scene.d_volume.voxel_size.z;
+    float step = fmaxf(fminf(vx, fminf(vy, vz)) * scene.step_size, 1e-4f);
+
+    float vmax = 0.f;
+    for (float t = fmaxf(tmin, 0.f); t <= tmax; t += step)
+    {
+        float3 p = make_float3(ro.x + rd.x * t, ro.y + rd.y * t, ro.z + rd.z * t);
+        float3 uvw_in = worldToUVW(scene.d_volume, p);
+        float s_in = tex3D<float>(scene.d_volume.field_tex, uvw_in.x, uvw_in.y, uvw_in.z);
+        vmax = fmaxf(vmax, s_in);
+    }
+    unsigned char g = (unsigned char)(fminf(1.f, vmax) * 255);
+    output[y * width + x] = make_uchar4(g, g, g, 255);
 }

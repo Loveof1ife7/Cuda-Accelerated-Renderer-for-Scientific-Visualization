@@ -6,6 +6,8 @@
 #include <vector>
 #include <Eigen/Dense>
 
+#define CUDA_CHECK(expr) cudaCheck((expr), #expr, __FILE__, __LINE__)
+
 inline void cudaCheck(cudaError_t e, const char *what, const char *file, int line)
 {
     if (e != cudaSuccess)
@@ -14,7 +16,6 @@ inline void cudaCheck(cudaError_t e, const char *what, const char *file, int lin
                                  " @ " + file + ":" + std::to_string(line));
     }
 }
-#define CUDA_CHECK(expr) cudaCheck((expr), #expr, __FILE__, __LINE__)
 
 #define CHECK_CUDA_IN_HOST(call)                                             \
     {                                                                        \
@@ -54,15 +55,6 @@ namespace StrUtils
  * Mathematical utilities
  */
 
-namespace MathUtils
-{
-    /* Clamps the input x to the closed range [lo, hi] */
-    __host__ __device__ float clamp(float x, float lo, float hi);
-    /* Guassian function */
-    __host__ __device__ float Gaussian(float mu, float sigma, float x);
-
-};
-
 /**
  * Utilities for checking CUDA errors
  */
@@ -97,4 +89,44 @@ namespace ImageUtils
     __host__ __device__ unsigned char gammaCorrection(float x);
     /* Converts RGB pixel array to byte array with 4 channels (RGBA) */
     __global__ void pixelArrayToBytesRGBA(Eigen::Vector3f *pix_arr, unsigned char *bytes, int res_x, int res_y);
+};
+
+namespace MathUtils::Camera
+{
+    static inline float3 f3(const Eigen::Vector3f &v) { return make_float3(v.x(), v.y(), v.z()); }
+}
+
+namespace MathUtils::Kernel
+{
+    __device__ __forceinline__ float3 f3(float x, float y, float z) { return make_float3(x, y, z); }
+    __device__ __forceinline__ float4 f4(float x, float y, float z, float w) { return make_float4(x, y, z, w); }
+    __device__ __forceinline__ float dot3(const float3 &a, const float3 &b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+    __device__ __forceinline__ float3 cross3(const float3 &a, const float3 &b)
+    {
+        return f3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+    }
+    __device__ __forceinline__ float length3(const float3 &v) { return sqrtf(dot3(v, v)); }
+    __device__ __forceinline__ float3 normalize3(const float3 &v)
+    {
+        float l = length3(v);
+        return l > 0.f ? f3(v.x / l, v.y / l, v.z / l) : f3(0, 0, 0);
+    }
+    __device__ __forceinline__ float3 add3(const float3 &a, const float3 &b) { return f3(a.x + b.x, a.y + b.y, a.z + b.z); }
+    __device__ __forceinline__ float3 sub3(const float3 &a, const float3 &b) { return f3(a.x - b.x, a.y - b.y, a.z - b.z); }
+    __device__ __forceinline__ float3 mulS(const float3 &a, float s) { return f3(a.x * s, a.y * s, a.z * s); }
+    __device__ __forceinline__ float3 mulV(const float3 &a, const float3 &b) { return f3(a.x * b.x, a.y * b.y, a.z * b.z); }
+    __device__ __forceinline__ float3 mad3(const float3 &a, float s, const float3 &b)
+    { // a + s*b
+        return f3(a.x + s * b.x, a.y + s * b.y, a.z + s * b.z);
+    }
+    __device__ __forceinline__ float clampf(float x, float lo, float hi) { return fminf(fmaxf(x, lo), hi); }
+
+};
+
+namespace MathUtils::Common
+{
+    /* Clamps the input x to the closed range [lo, hi] */
+    __host__ __device__ float clamp(float x, float lo, float hi);
+    /* Guassian function */
+    __host__ __device__ float Gaussian(float mu, float sigma, float x);
 };

@@ -61,6 +61,15 @@ __device__ float4 TransferFunction::lookup(float x) const
     return m_device_table[idx];
 }
 
+DeviceTF TransferFunction::toDevice() const
+{
+    DeviceTF d_tf{};
+    d_tf.domain = m_domain;
+    d_tf.tf1D = m_tex;
+
+    return d_tf;
+}
+
 //! api usage
 // __global__ void renderKernel(
 //     float *scalar_field,   // input scalar volume

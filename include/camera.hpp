@@ -4,11 +4,6 @@
 #include "ray.hpp"
 #include "device_structs.hpp"
 
-namespace camera_utils
-{
-    static inline float3 f3(const Eigen::Vector3f &v) { return make_float3(v.x(), v.y(), v.z()); }
-}
-
 //! host-only, package to to DeviceCamera
 class Camera
 {

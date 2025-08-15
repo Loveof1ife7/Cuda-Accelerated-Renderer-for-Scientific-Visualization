@@ -21,6 +21,7 @@ public:
     const Description &getDesc() const { return m_desc; }
     cudaTextureObject_t getFieldTex() const { return m_fieldTex; }
     cudaTextureObject_t getGradTex() const { return m_gradTex; }
+    float3 getVolumeCenter() const;
 
     void uploadGradient(const float3 *hostGrad);
 

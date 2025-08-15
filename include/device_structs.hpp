@@ -46,7 +46,7 @@ struct DeviceScene
     DeviceLight *d_lights = nullptr;
     int lights_count = 0;
 
-    float step_size = 0.5f;
+    float step_size = 0.1f;
     float opacityScale = 1.0f;
     float isoValue = 0.0f;
     int mode = 0; // 0 DVR, 1 MIP, 2 ISO...

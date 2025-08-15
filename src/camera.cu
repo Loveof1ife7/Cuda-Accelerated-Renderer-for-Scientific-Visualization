@@ -1,6 +1,7 @@
 #include "camera.hpp"
+#include "cuda_utils.hpp"
 
-using camera_utils::f3;
+using MathUtils::Camera::f3;
 
 Camera::Camera(const Eigen::Vector3f &pos,
                float vertical_fov_degrees,

@@ -5,14 +5,14 @@
 //! create a 3D texture bind to a 3D volume
 static cudaTextureObject_t make3DTex(cudaArray_t arr, bool normalized = true)
 {
-    cudaResourceDesc resDesc;
+    cudaResourceDesc resDesc{};
     resDesc.resType = cudaResourceTypeArray;
     resDesc.res.array.array = arr;
 
-    cudaTextureDesc texDesc;
+    cudaTextureDesc texDesc{};
     texDesc.normalizedCoords = normalized;
     texDesc.filterMode = cudaFilterModeLinear;
-    texDesc.addressMode[0] = texDesc.addressMode[1] = texDesc.addressMode[2] = cudaAddressModeBorder;
+    texDesc.addressMode[0] = texDesc.addressMode[1] = texDesc.addressMode[2] = cudaAddressModeClamp;
     texDesc.readMode = cudaReadModeElementType;
 
     cudaTextureObject_t tex = 0;
@@ -61,6 +61,14 @@ void Volume::uploadGradient(const float3 *hostGrad)
     CUDA_CHECK(cudaMemcpy3D(&cp));
 
     m_gradTex = make3DTex(m_arrayGrad, true);
+}
+
+float3 Volume::getVolumeCenter() const
+{
+    return make_float3(
+        m_desc.origin.x + m_desc.voxelSize.x * (m_desc.dim.x - 1) * 0.5f,
+        m_desc.origin.y + m_desc.voxelSize.y * (m_desc.dim.y - 1) * 0.5f,
+        m_desc.origin.z + m_desc.voxelSize.z * (m_desc.dim.z - 1) * 0.5f);
 }
 
 DeviceVolume Volume::toDevice() const

@@ -30,7 +30,7 @@ public:
     void render(Scene &scene, bool commitScene = false);
 
     // Accessors
-    GLuint outputTexture() const { return glTex_; }
+    GLuint getResultTexture() const { return glTex_; }
     int width() const { return width_; }
     int height() const { return height_; }
 

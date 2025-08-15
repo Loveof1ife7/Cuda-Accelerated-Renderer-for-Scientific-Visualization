@@ -16,6 +16,8 @@ public:
     __host__ __device__ cudaTextureObject_t getCudaTex() const { return m_tex; }
     __host__ __device__ float2 getDomain() const { return m_domain; }
 
+    DeviceTF toDevice() const;
+
 private:
     int m_count = 0;
     float2 m_domain = {0, 1};

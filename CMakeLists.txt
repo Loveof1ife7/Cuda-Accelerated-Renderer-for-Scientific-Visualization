@@ -10,12 +10,13 @@ set(CMAKE_CUDA_STANDARD 11)
 # Compilation flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -w")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr -Xcompiler=-O3")
-
-set(CMAKE_CUDA_ARCHITECTURES 86)
+set(CMAKE_CUDA_ARCHITECTURES "86")
 
 # === Dependencies ===
 # CUDA
 enable_language(CUDA)
+#find_package(CUDA REQUIRED)  # 确保找到 CUDA
+#include_directories(${CUDA_INCLUDE_DIRS})  # 显式添加 CUDA 头文件路径
 
 # OpenGL
 
@@ -55,21 +56,16 @@ target_link_libraries(imgui PUBLIC
 add_library(glad STATIC third-party/glad/src/glad.c)
 target_include_directories(glad PUBLIC third-party/glad/include)
 
-# === Add Subdirectories ===
-add_subdirectory(test)
-
 # === Executable ===
-file(GLOB_RECURSE SOURCE_FILES
-    "src/*.cpp"
-    "src/*.cu"
-)
-
-add_executable(cuda-volume-renderer ${SOURCE_FILES})
+file(GLOB_RECURSE CUDA_SOURCES "src/*.cu")  
+file(GLOB_RECURSE CPP_SOURCES "src/*.cpp")
+add_executable(cuda-volume-renderer ${CUDA_SOURCES} ${CPP_SOURCES})
 
 # CUDA settings
-set_target_properties(cuda-volume-renderer PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+set_target_properties(cuda-volume-renderer PROPERTIES CUDA_SEPARABLE_COMPILATION ON
+CUDA_ARCHITECTURES 86  CUDA_RESOLVE_DEVICE_SYMBOLS ON )
 
-target_include_directories(cuda-volume-renderer PRIVATE include src third-party third-party/imgui third-party/imgui/backends)
+target_include_directories(cuda-volume-renderer PRIVATE include src third-party third-party/imgui third-party/imgui/backends ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES} )
 
 target_link_libraries(cuda-volume-renderer 
     PRIVATE    
@@ -77,8 +73,9 @@ target_link_libraries(cuda-volume-renderer
     glfw 
     OpenGL::GL
     imgui
-    test_helper
-    ${CMAKE_DL_LIBS})
+    ${CMAKE_DL_LIBS}
+    ${CUDA_INCLUDE_DIRS}
+    )
 
 # === Resource Handling ===
 file(GLOB_RECURSE RES_IMG CONFIGURE_DEPENDS resources/*.{png,jpg})
@@ -102,6 +99,11 @@ endforeach()
 
 target_compile_definitions(cuda-volume-renderer PRIVATE RESOURCES_DIRECTORY="${RES_DIR}")
 
+target_compile_options(cuda-volume-renderer PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:
+        -Xcudafe "--diag_suppress=20236"  # 禁用该特定警告
+    >
+)
 if(WIN32)
     target_compile_definitions(cuda-volume-renderer PRIVATE _AMD64_)
 endif()

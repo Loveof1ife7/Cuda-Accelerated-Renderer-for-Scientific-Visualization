@@ -8,8 +8,8 @@
 #include "image_presenter.hpp"
 #include "scene.hpp"
 #include "volume_renderer.hpp"
-
-#include "helper.hpp"
+#include "cuda_utils.hpp"
+#include "debug_utils.hpp"
 
 const int WINDOW_WIDTH = 800;
 const int WINDOW_HEIGHT = 600;
@@ -102,20 +102,50 @@ int main(int, char **)
   }
 
   initImGui(window);
+  CUDA_CHECK(cudaSetDevice(0));
 
   ImagePresenter *presenter = new ImagePresenter(WINDOW_WIDTH, WINDOW_HEIGHT);
+
   VolumeRenderer::CreateInfo ci{WINDOW_WIDTH, WINDOW_HEIGHT, false};
   VolumeRenderer *renderer = new VolumeRenderer(ci);
-  Scene *scene = new Scene();
-  // renderer->render(scene);
-  GLuint textureID = createGradientTexture(WINDOW_WIDTH, WINDOW_HEIGHT);
+
+  GLuint dbgTex = makeChecker(WINDOW_WIDTH, WINDOW_HEIGHT);
+  auto volume = makeDummyVolume();
+  auto volume_center = volume->getVolumeCenter();
+  auto tf = makeSimpleTF();
+
+  Camera cam(Eigen::Vector3f(-50, -50, 0), /*fov*/ 45.0f, Eigen::Vector2i(WINDOW_WIDTH, WINDOW_HEIGHT));
+  cam.lookAt(Eigen::Vector3f(volume_center.x, volume_center.y, volume_center.z), Eigen::Vector3f(0, 1, 0));
+
+  Lights lights;
+  std::vector<DeviceLight> ls(1);
+  ls[0].position = make_float3(2, 2, 2);
+  ls[0].color = make_float3(1, 1, 1);
+  ls[0].intensity = 1.0f;
+  ls[0].type = 0;
+  lights.set(ls);
+
+  Scene scene;
+  scene.setCamera(&cam)
+      .setLights(&lights)
+      .setVolume(volume)
+      .setTransferFunction(tf)
+      .setRenderParams(/*step*/ 0.5f, /*opacityScale*/ 1.0f, /*mode*/ 0, /*iso*/ 0.5f)
+      .setClipBox(make_float3(-1e3f, -1e3f, -1e3f), make_float3(1e3f, 1e3f, 1e3f));
+  scene.commit(0);
 
   while (!glfwWindowShouldClose(window))
   {
     glfwPollEvents();
 
-    // presenter->display(renderer->getOutputTexture());
-    presenter->display(textureID);
+    renderer->render(scene);
+
+    glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+    glClearColor(0.1f, 0.1f, 0.1f, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // presenter->display(dbgTex);
+    presenter->display(renderer->getResultTexture());
 
     glfwSwapBuffers(window);
   }

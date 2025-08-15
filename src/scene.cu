@@ -67,41 +67,21 @@ void Scene::validateOrThrow() const
 void Scene::commit(cudaStream_t stream)
 {
     validateOrThrow();
+    bool dsDirty = false;
 
     if (m_dirtyCam)
     {
-        DeviceCamera dc{};
-        dc.position_ = camera_utils::f3(m_cam->getPosition());
-        dc.forward_ = camera_utils::f3(m_cam->getForward().normalized());
-        dc.up_ = camera_utils::f3(m_cam->getUp().normalized());
-        dc.right_ = camera_utils::f3(m_cam->getRight().normalized());
-        dc.vertical_fov_ = m_cam->getVerticalFov();
-
-        m_ds_host.d_camera = dc;
+        m_ds_host.d_camera = m_cam->toDevice();
         m_dirtyCam = false;
     }
     if (m_dirtyVol)
     {
-        const auto &d = m_volume->getDesc();
-        DeviceVolume dv{};
-        dv.field_tex = m_volume->getFieldTex();
-        dv.grad_tex = m_volume->getGradTex();
-        dv.dim = d.dim;
-        dv.voxel_size = d.voxelSize;
-        dv.origin = d.origin;
-        dv.value_range = d.valueRange;
-        dv.density_scale = d.densityScale;
-
-        m_ds_host.d_volume = dv;
+        m_ds_host.d_volume = m_volume->toDevice();
         m_dirtyVol = false;
     }
     if (m_dirtyTF)
     {
-        DeviceTF d_tf{};
-        d_tf.tf1D = m_tf->getCudaTex();
-        d_tf.domain = m_tf->getDomain();
-
-        m_ds_host.d_tf = d_tf;
+        m_ds_host.d_tf = m_tf->toDevice();
         m_dirtyTF = false;
     }
 
@@ -128,9 +108,11 @@ void Scene::commit(cudaStream_t stream)
     {
         CUDA_CHECK(
             cudaMalloc(&m_ds_dev, sizeof(m_ds_host)));
-
+    }
+    if (dsDirty)
+    {
         CUDA_CHECK(
-            cudaMemcpyAsync(m_ds_dev, &m_ds_host, sizeof(m_ds_host), cudaMemcpyHostToDevice));
+            cudaMemcpyAsync(m_ds_dev, &m_ds_host, sizeof(m_ds_host), cudaMemcpyHostToDevice, stream));
     }
 }
 

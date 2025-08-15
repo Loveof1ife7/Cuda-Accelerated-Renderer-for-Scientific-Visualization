@@ -1,7 +1,7 @@
 #include "scene.hpp"
 #include "volume_renderer.hpp"
 #include "renderer_kernel.hpp"
-
+#include "debug_utils.hpp"
 #include "cuda_utils.hpp"
 #include "cuda_gl_interop.h"
 
@@ -86,6 +86,11 @@ VolumeRenderer::~VolumeRenderer()
     freeDeviceBuffer();
     destoryGLTexture();
     unregisterCudaInterop();
+    if (stream_)
+    {
+        cudaStreamDestroy(stream_);
+        stream_ = nullptr;
+    };
 }
 
 void VolumeRenderer::resize(int newW, int newH)
@@ -137,7 +142,7 @@ void VolumeRenderer::render(Scene &scene, bool commitScene)
     cudaArray_t dstArray = nullptr;
     cudaGraphicsSubResourceGetMappedArray(&dstArray, cudaRes_, 0, 0);
 
-    // preapare kernal params, pass by value
+    // prepare kernal params, pass by value
     const DeviceScene &ds = scene.snapshotHost();
 
     dim3 blockSize(16, 16);
@@ -149,7 +154,12 @@ void VolumeRenderer::render(Scene &scene, bool commitScene)
         ensureCapacity(width_, height_);
 
         volumeRendererKernel<<<gridSize, blockSize, 0, stream_>>>(ds, d_output_, width_, height_);
-
+        //  volumeRenderCheckCUDAGL<<<gridSize, blockSize, 0, stream_>>>(ds, d_output_, width_, height_);
+        //  kernelSampleCenter<<<gridSize, blockSize, 0, stream_>>>(ds, d_output_, width_, height_);
+        //  kernelSliceUV<<<gridSize, blockSize, 0, stream_>>>(ds, d_output_, width_, height_);
+        // kernelRayHit<<<gridSize, blockSize, 0, stream_>>>(ds, d_output_, width_, height_);
+        // kernelFirstSample<<<gridSize, blockSize, 0, stream_>>>(ds, d_output_, width_, height_);
+        // kernelMip<<<gridSize, blockSize, 0, stream_>>>(ds, d_output_, width_, height_);
         CUDA_CHECK(cudaGetLastError());
 
         // 把线性缓冲拷到 GL 纹理的 cudaArray（设备到设备拷贝）
