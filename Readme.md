@@ -1,75 +1,100 @@
-# Cuda-Accelerated-Renderer-for-SciVis
-
-## 模块划分方式
-
-### 1. **核心渲染模块（Core Rendering）**
-
-负责核心的 raymarching 体绘制逻辑，是最重要的部分。
-
-| 模块名               | 功能说明                   |
-| ----------------- | ---------------------- |
-| `volume_renderer` | c++ class for volume renderer，体积渲染核心逻辑 |
-| `render_kernal`   | cuda kernel for accelerated renderering |
-| `camera`          | 构造视图光线                 |
-| `scene`            | 存储渲染结果图像并导出为 PNG       |
-| `transfer_function`| 向量、矩阵运算，常用函数           |
-| `config`          | 渲染参数、图像尺寸、步长等常量配置      |
-
-> ✅：实现一个最小可运行的 pipeline。
+# Cuda Volume Rendering System Architecture
+The architecture is designed with a clear separation between **data management** and **computational solving**, enabling modularity, scalability, and easier maintenance.
 
 ---
 
-### 2. **数据加载模块（Data I/O）**
+## 1. Core Module
+Handles fundamental raymarching-based volume rendering pipeline.
+The **scene** module is responsible for storing and managing all data required for rendering:
 
-负责读取 `.bin`、`.raw` 等体数据格式并传给 CUDA。
+| Component           | Responsibility                                                         |
+| ------------------- | ---------------------------------------------------------------------- |
+| `camera`            | Constructs view rays and controls projection/perspective               |
+| `transfer_function` | Handles vector/matrix operations, color mapping, and utility functions |
+| `light`             | Stores and manages lighting parameters for shading models              |
+| `volume`            | Represents volumetric datasets and provides sampling access            |
 
-| 模块名           | 功能说明               |
-| ------------- | ------------------ |
-| `res_manager` | 加载资源（体数据、配置等）      |
-| `bbox`        | 提供 Volume 的边界盒裁剪信息 |
+This separation ensures that scene configuration and dataset preparation are isolated from the rendering computation.
 
-> 🟨 在渲染基本完成后添加，方便更换体数据和测试。
+The **solver** module is responsible for executing the rendering process on the GPU:
 
----
+| Component       | Responsibility                                                          |
+| --------------- | ----------------------------------------------------------------------- |
+| `volume_kernel` | CUDA kernels for volume data sampling, interpolation, and preprocessing |
+| `render_kernel` | CUDA kernels for raymarching and image synthesis based on scene data    |
 
-### 3. **光照 & 光线模块（Ray & Lighting）**
-
-负责构造光线、采样体素密度、进行光照计算。
-
-| 模块名            | 功能说明              |
-| -------------- | ----------------- |
-| `ray`          | 光线数据结构            |
-| `light`        | 简单方向光、Phong 光照模型等 |
-| `interpolator` | 三线性插值体素值          |
-
-> 🟨 可在初版完成后加入照明与插值增强视觉效果。
+The solver consumes data from the **scene** and produces the final rendered image.
 
 ---
 
-### 4. **高级功能模块（高级特性）**
+## 2. Host/Device Mirror Design
 
-包括交互、GUI、分类器（TF）、隐式几何等进阶特性。
+| 组件   | Host 类型（示例）          | Device 镜像         | 说明                                                 |
+| ---- | -------------------- | ----------------- | -------------------------------------------------- |
+| 相机   | `Camera`             | `DeviceCamera`    | 视线/基向量、位置、垂直视场；提供 `generateRay` 设备侧方法。             |
+| 体数据  | `Volume`             | `DeviceVolume`    | 维度、体素尺寸、原点、值域、密度缩放；字段/梯度绑定为 `cudaTextureObject_t`。 |
+| 传递函数 | `TransferFunction`   | `DeviceTF`        | 1D TF 纹理与域；设备侧 `sample(value)` 返回 `float4`（rgba）。  |
+| 光源   | `std::vector<Light>` | `DeviceLight*`    | 位置/颜色/强度/类型；Scene 负责分配与拷贝到设备端数组。                   |
+| 渲染参数 | `Config`/Scene 字段    | 同步到 `DeviceScene` | 步长、透明度缩放、等值面阈值、模式、裁剪盒等。                            |
 
-| 模块名             | 功能说明                   |
-| --------------- | ---------------------- |
-| `gui`           | ImGui 实时交互             |
-| `classifier`    | 灰度值 → 颜色/透明度传输函数       |
-| `implicit_geom` | 隐式几何体绘制（e.g. Metaball） |
-| `main_scene`    | 管理整体渲染场景               |
+### Example: Host and Device Mirror Design
 
----
+**Host-side: `Volume`**
+```cpp
+class Volume {
+public:
+    struct Description {
+        int3 dim;
+        float3 origin;
+        float3 voxelSize;
+        float2 valueRange;
+        float densityScale;
+    };
 
-## 开发顺序
+    Volume(const Description &desc, const float *hostScalar);
+    ~Volume();
 
-| 阶段      | 模块                                              | 目标                           |
-| ------- | ----------------------------------------------- | ---------------------------- |
-| 🟢 阶段 1 | `camera` + `volume_renderer` + `film` + `utils` | 实现最小可运行 CUDA 渲染器，输出一张 PNG    |
-| 🟡 阶段 2 | `config` + `res_manager`                        | 支持换体数据、配置步长、分辨率等             |
-| 🟠 阶段 3 | `interpolator` + `ray` + `light`                | 实现插值采样、光照增强，提升图像质量           |
-| 🔵 阶段 4 | `classifier`, `gui`, `bbox`                     | 加入传输函数 GUI、Bounding Box 裁剪优化 |
-| 🟣 阶段 5 | `main_scene`, `implicit_geom`                   | 实现复杂场景管理、添加可编程的隐式体绘制         |
+    const Description &getDesc() const;
+    cudaTextureObject_t getFieldTex() const;
+    cudaTextureObject_t getGradTex() const;
 
----
+    void uploadGradient(const float3 *hostGrad);
+    DeviceVolume toDevice() const;
+
+private:
+    Description m_desc;
+    cudaArray_t m_arrayField = nullptr;
+    cudaTextureObject_t m_fieldTex = 0;
+
+    cudaArray_t m_arrayGrad = nullptr;
+    cudaTextureObject_t m_gradTex = 0;
+};
+```
+
+**Device-side: DeviceVolume**
+The device-side structs are stripped-down representations of host objects, containing only the essential data for kernel execution.
+```cpp
+struct DeviceVolume {
+    cudaTextureObject_t field_tex = 0;
+    cudaTextureObject_t grad_tex = 0;
+
+    int3 dim{0, 0, 0};
+    float3 voxel_size{1.f, 1.f, 1.f};
+    float3 origin{0.f, 0.f, 0.f};
+    float2 value_range{0.f, 1.f};
+    float density_scale{1.f};
+};
+```
+
+# Development Roadmap
+
+| Phase   | Modules                                      | Objectives                                |
+|---------|----------------------------------------------|-------------------------------------------|
+| 🟢 1     | `camera`+`volume_renderer`+`film`+`utils`   | Minimal working CUDA renderer → PNG       |
+| 🟡 2     | `config`+`res_manager`                       | Configurable parameters + data swapping   |
+| 🟠 3     | `interpolator`+`ray`+`light`                 | Improved sampling + lighting              |
+| 🔵 4     | `classifier`, `gui`, `bbox`                  | TF GUI + bounding box optimization        |
+| 🟣 5     | `main_scene`, `implicit_geom`               | Scene management + implicit shapes       |
 
 ## Core principles
 
